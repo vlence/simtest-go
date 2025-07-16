@@ -10,36 +10,24 @@ import (
 type Clock interface {
         // Now returns the current time.
         Now() time.Time
+
+        NewTimer(d time.Duration) Timer
+
+        NewTicker(d time.Duration) Ticker
 }
 
-// realClock represents the real world clock. Now will always return
-// the current real world time according to the underlying system.
-type realClock struct{}
+// A Timer represents an action that needs to be completed in the future.
+// The interface is deliberately kept similar to that of *time.Timer.
+type Timer interface {
+        Reset(d time.Duration) bool
 
-// Now returns the current time.
-func (clock *realClock) Now() time.Time {
-        return time.Now()
+        Stop() bool
 }
 
-// RealClock represents real world time. Calling Now on RealClock
-// will always return your system's current time. Use this to tell
-// the time when running your app in production.
-var RealClock Clock = &realClock{}
+// A Ticker represents an action that needs to be executed at intervals.
+// The interface is deliberately kept similar to that of *time.Ticker.
+type Ticker interface {
+        Reset(d time.Duration)
 
-// SimClock represents a simulated clock. The clock moves forward
-// in time only when Tick is called.
-type SimClock struct{
-        now time.Time
-}
-
-// Now returns the current time. To move
-// the time forward call Tick. Repeated calls to Now will return
-// the same time until Tick is called.
-func (clock *SimClock) Now() time.Time {
-        return clock.now
-}
-
-// Tick moves the clock's time forward by tickSize.
-func (clock *SimClock) Tick(tickSize time.Duration) {
-        clock.now = clock.now.Add(tickSize)
+        Stop()
 }
