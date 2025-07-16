@@ -1,3 +1,3 @@
-module github.com/vlence/dst-go
+module github.com/vlence/simtest
 
 go 1.24.3

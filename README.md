@@ -1,2 +1,3 @@
-# dst-go
-Deterministic Simulation Testing
+# simtest
+
+This library provides some primitives for writing simulation tests.
