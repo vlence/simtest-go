@@ -15,7 +15,6 @@ func TestSimClockDoesNotProgressUntilTicked(t *testing.T) {
                 }
         }
         
-
         tickSize := 1 * time.Millisecond
         expectedTime := now.Add(tickSize)
 

@@ -6,15 +6,17 @@ import "time"
 // the current real world time according to the underlying system.
 type realClock struct{}
 
-// Now returns the current time.
+// Now returns the result of calling time.Now.
 func (clock *realClock) Now() time.Time {
         return time.Now()
 }
 
+// NewTimer returns the result of calling time.NewTimer.
 func (*realClock) NewTimer(d time.Duration) Timer {
         return time.NewTimer(d)
 }
 
+// NewTicker returns the result of calling time.NewTicker.
 func (*realClock) NewTicker(d time.Duration) Ticker {
         return time.NewTicker(d)
 }
