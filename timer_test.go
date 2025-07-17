@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestNewTimerHasExpectedDeadline(t *testing.T) {
+func TestTimerHasExpectedDeadline(t *testing.T) {
         epoch := time.Now()
         clock := NewSimClock(epoch)
         defer clock.Stop()
@@ -20,7 +20,7 @@ func TestNewTimerHasExpectedDeadline(t *testing.T) {
         }
 }
 
-func TestTimerIsFiredAfterClockTicks(t *testing.T) {
+func TestTimerIsFired(t *testing.T) {
         epoch := time.Now()
         clock := NewSimClock(epoch)
         defer clock.Stop()
