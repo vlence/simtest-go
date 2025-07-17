@@ -5,18 +5,6 @@ import (
         "time"
 )
 
-// send timers to this channel to watch them
-var addTimerChan = make(chan *SimTimer)
-
-// send ticks to this channel so that timers can be fired
-var timerTickChan = make(chan time.Time)
-
-// send true to this channel to stop listening for timer events
-var stopTimersChan = make(chan bool)
-
-// send timers to this channel to remove them from the watch list
-var removeTimerChan = make(chan *SimTimer)
-
 // A Timer represents an action that needs to be completed in the future.
 // The interface is deliberately kept similar to that of *time.Timer.
 type Timer interface {
@@ -35,61 +23,11 @@ type SimTimer struct {
         mu       *sync.Mutex
         stopped  bool
         deadline time.Time
-}
-
-// listenForTimerEvents starts a goroutine that adds timers to
-// a watchlist, fires them when they've reached their deadline
-// and removes them from the watchlist.
-//
-// When a new timer is created it should be sent to addTimerChan.
-// If not sent then the timer will never be fired even if it's
-// deadline has passed.
-//
-// When the clock ticks it should send the correct time to
-// timerTickChan. All timers are checked and the ones whose
-// deadline has been reached are fired. Timers are automatically
-// removed from the watchlist after they're fired.
-//
-// If a timer is stopped by calling Stop it should be sent to
-// removeTimerChan to remove it from the watchlist.
-func listenForTimerEvents() {
-        var yes bool
-        var now time.Time
-        var timer *SimTimer
-        var timers map[*SimTimer]bool
-
-        timers = make(map[*SimTimer]bool)
-
-        for {
-                select {
-                case timer = <-addTimerChan:
-                        timers[timer] = true
-
-                case timer = <-removeTimerChan:
-                        delete(timers, timer)
-
-                case now = <-timerTickChan:
-                        for timer = range timers {
-                                fired := timer.fire(now)
-
-                                if fired {
-                                        delete(timers, timer)
-                                }
-                        }
-                case yes = <-stopTimersChan:
-                        if yes {
-                                return
-                        }
-                }
-        }
-}
-
-func stopListeningForTimerEvents() {
-        stopTimersChan <- true
+        events *timerEvents
 }
 
 // newSimTimer returns a new SimTimer.
-func newSimTimer(deadline time.Time) *SimTimer {
+func newSimTimer(deadline time.Time, events *timerEvents) *SimTimer {
         ch := make(chan time.Time)
 
         timer := new(SimTimer)
@@ -98,8 +36,7 @@ func newSimTimer(deadline time.Time) *SimTimer {
         timer.mu = new(sync.Mutex)
         timer.stopped = false
         timer.deadline = deadline
-
-        addTimerChan <- timer
+        timer.events = events
 
         return timer
 }
@@ -131,7 +68,7 @@ func (timer *SimTimer) Stop() bool {
                 return false
         }
 
-        removeTimerChan <- timer
+        timer.events.remove <- timer
         timer.stopped = true
 
         return true
