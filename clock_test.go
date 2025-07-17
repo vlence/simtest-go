@@ -17,10 +17,11 @@ func TestSimClockDoesNotProgressIfNotTicked(t *testing.T) {
         for range 1_000_000 {
                 currentTime := time.Now()
                 timeHasPassed := currentTime.After(epoch)
-                clockTimeHasChanged := !clock.Now().Equal(epoch)
+                currentSimTime := clock.Now()
+                clockTimeHasChanged := !currentSimTime.Equal(epoch)
 
                 if timeHasPassed && clockTimeHasChanged {
-                        t.Errorf("simclock time has changed without ticking")
+                        t.Errorf("simclock time changed from %s to %s", epoch, currentSimTime)
                 }
         }
 }
