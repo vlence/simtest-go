@@ -1,8 +1,8 @@
 package simtest
 
 import (
-	"sync"
-	"time"
+        "sync"
+        "time"
 )
 
 // A Clock reports the current time whenever Now is called.
@@ -31,16 +31,16 @@ type timerEvents struct {
 
         // Send true to this channel to stop listening for timer events.
         stop chan bool
-        
+
         // Send clock ticks to this channel.
         tick chan time.Time
 }
 
 // SimClock represents a simulated clock. The clock moves forward
 // in time only when Tick is called.
-type SimClock struct{
-        mu *sync.RWMutex
-        now time.Time
+type SimClock struct {
+        mu          *sync.RWMutex
+        now         time.Time
         timerEvents *timerEvents
 }
 
@@ -50,10 +50,10 @@ func NewSimClock(now time.Time) *SimClock {
         clock.mu = new(sync.RWMutex)
         clock.now = now
         clock.timerEvents = &timerEvents{
-                add: make(chan *SimTimer),
+                add:    make(chan *SimTimer),
                 remove: make(chan *SimTimer),
-                stop: make(chan bool),
-                tick: make(chan time.Time),
+                stop:   make(chan bool),
+                tick:   make(chan time.Time),
         }
 
         go clock.listenForTimerEvents()
