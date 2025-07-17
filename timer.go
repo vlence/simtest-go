@@ -1,8 +1,10 @@
 package simtest
 
 import (
-        "sync"
-        "time"
+	"sync"
+	"time"
+
+	"github.com/vlence/gossert"
 )
 
 // A Timer represents an action that needs to be completed in the future.
@@ -23,11 +25,17 @@ type SimTimer struct {
         mu       *sync.Mutex
         stopped  bool
         deadline time.Time
-        events *timerEvents
+        events   *timerEvents
 }
 
 // newSimTimer returns a new SimTimer.
 func newSimTimer(deadline time.Time, events *timerEvents) *SimTimer {
+        gossert.Ok(events != nil, "simtimer: timer events is nil")
+        gossert.Ok(events.add != nil, "simtimer: add timer event is nil")
+        gossert.Ok(events.remove != nil, "simtimer: remove timer event is nil")
+        gossert.Ok(events.stop != nil, "simtimer: stop timer event is nil")
+        gossert.Ok(events.tick != nil, "simtimer: tick timer event is nil")
+
         ch := make(chan time.Time)
 
         timer := new(SimTimer)

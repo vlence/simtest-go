@@ -1,8 +1,10 @@
 package simtest
 
 import (
-        "sync"
-        "time"
+	"sync"
+	"time"
+
+	"github.com/vlence/gossert"
 )
 
 // A Clock reports the current time whenever Now is called.
@@ -145,6 +147,8 @@ func (clock *SimClock) listenForTimerEvents() {
 
                 case now = <-clock.timerEvents.tick:
                         for timer = range timers {
+                                gossert.Ok(!timer.stopped, "simclock: stopped timer not removed from watchlist")
+
                                 fired := timer.fire(now)
 
                                 if fired {
