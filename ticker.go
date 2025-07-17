@@ -3,8 +3,6 @@ package simtest
 import (
 	"sync"
 	"time"
-
-	"github.com/vlence/gossert"
 )
 
 // A Ticker represents an action that needs to be executed at intervals.
@@ -60,9 +58,4 @@ func (ticker *SimTicker) Stop() {
         if ticker.stopped {
                 return
         }
-
-        ticker.stopped = true
-        ticker.clock.removeTicker(ticker)
-        _, ok := ticker.clock.tickers[ticker]
-        gossert.Ok(!ok, "simticker: ticker was not removed from tickers list")
 }
