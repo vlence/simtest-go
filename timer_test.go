@@ -75,7 +75,7 @@ func TestTimerFiredOnlyOnce(t *testing.T) {
         }
 }
 
-func FuzzTestTimerFiredOnlyOnce(f *testing.F) {
+func FuzzTimerFiredOnlyOnce(f *testing.F) {
         minResolution := int64(time.Microsecond)
         maxResolution := int64(time.Second)
 
