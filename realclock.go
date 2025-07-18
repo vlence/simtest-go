@@ -12,8 +12,9 @@ func (clock *realClock) Now() time.Time {
 }
 
 // NewTimer returns the result of calling time.NewTimer.
-func (*realClock) NewTimer(d time.Duration) Timer {
-        return time.NewTimer(d)
+func (*realClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
+        timer := time.NewTimer(d)
+        return timer, timer.C
 }
 
 // NewTicker returns the result of calling time.NewTicker.

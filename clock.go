@@ -15,7 +15,7 @@ type Clock interface {
         Now() time.Time
 
         // NewTimer returns a timer that fires after d time has passed.
-        NewTimer(d time.Duration) Timer
+        NewTimer(d time.Duration) (Timer, <-chan time.Time)
 
         // NewTicker returns a ticker that fires every d intervals.
         NewTicker(d time.Duration) Ticker
@@ -74,11 +74,11 @@ func (clock *SimClock) Now() time.Time {
 }
 
 // NewTimer returns a *SimTimer.
-func (clock *SimClock) NewTimer(d time.Duration) Timer {
+func (clock *SimClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
         timer := newSimTimer(clock.Now().Add(d), clock.timerEvents)
         clock.timerEvents.add <- timer
 
-        return timer
+        return timer, timer.ch
 }
 
 // NewTicker returns a *SimTicker.

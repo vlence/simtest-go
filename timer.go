@@ -20,7 +20,6 @@ type Timer interface {
 // SimTimer uses SimClock internally so the timer never fires unless
 // the SimClock is Tick'ed and the timer's deadline is passed.
 type SimTimer struct {
-        C        <-chan time.Time
         ch       chan time.Time
         mu       *sync.Mutex
         stopped  bool
@@ -39,7 +38,6 @@ func newSimTimer(deadline time.Time, events *timerEvents) *SimTimer {
         ch := make(chan time.Time)
 
         timer := new(SimTimer)
-        timer.C = ch
         timer.ch = ch
         timer.mu = new(sync.Mutex)
         timer.stopped = false
