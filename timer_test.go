@@ -123,3 +123,65 @@ func FuzzTimerFiredOnlyOnce(f *testing.F) {
                 }
         })
 }
+
+func FuzzClockWithMultipleTimers(f *testing.F) {
+        minResolution := int64(time.Microsecond)
+        maxResolution := int64(time.Second)
+
+        for i := range 10 {
+                tickMul := rand.Int64N(100) + 1
+                tickRes := rand.Int64N(maxResolution - minResolution) + minResolution
+                tickSize := tickMul * tickRes
+
+                f.Add(i+1, int64(tickSize))
+        }
+
+        f.Fuzz(func(t *testing.T, numTimers int, b int64) {
+                epoch := time.Now()
+                clock := NewSimClock(epoch)
+                defer clock.Stop()
+
+                if numTimers <= 0 {
+                        t.SkipNow()
+                }
+
+                tickSize := time.Duration(b)
+                channels := make([]<-chan time.Time, numTimers)
+                longestDur := int64(0)
+
+                for i := range numTimers {
+                        durMul := rand.Int64N(1000)
+                        durRes := rand.Int64N(maxResolution - minResolution) + minResolution
+                        dur := durMul * durRes
+
+                        if longestDur < dur {
+                                longestDur = dur
+                        }
+
+                        _, ch := clock.NewTimer(time.Duration(dur))
+
+                        channels[i] = ch
+                }
+
+                minTicks := (longestDur / b) // min number of ticks before timer is fired
+                maxIters := minTicks + 100
+
+                fired := 0
+                for range maxIters {
+                        for _, ch := range channels {
+                                select {
+                                case <-ch:
+                                        fired++
+                                default:
+                                        ;
+                                }
+                        }
+
+                        clock.Tick(tickSize)
+                }
+
+                if fired != numTimers {
+                        t.Errorf("all timers were not fired")
+                }
+        })
+}
