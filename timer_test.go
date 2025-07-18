@@ -68,4 +68,8 @@ func TestTimerFiredOnlyOnce(t *testing.T) {
                         clock.Tick(tickSize)
                 }
         }
+
+        if !fired {
+                t.Errorf("timer not fired")
+        }
 }
