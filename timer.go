@@ -35,7 +35,12 @@ func newSimTimer(deadline time.Time, events *timerEvents) *SimTimer {
         gossert.Ok(events.stop != nil, "simtimer: stop timer event is nil")
         gossert.Ok(events.tick != nil, "simtimer: tick timer event is nil")
 
-        ch := make(chan time.Time)
+        // Using buffer size 1 so that we aren't blocked if nobody is
+        // waiting for a message from the channel yet. Size 1 is good
+        // enough because we should be sending a message only once
+        // using this channel. If we're sending a message more than
+        // once it's a bug.
+        ch := make(chan time.Time, 1)
 
         timer := new(SimTimer)
         timer.ch = ch
