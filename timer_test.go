@@ -80,29 +80,32 @@ func FuzzTestTimerFiredOnlyOnce(f *testing.F) {
         maxResolution := int64(time.Second)
 
         for range 10 {
-                mul := rand.Int64N(9) + 1
-                res := rand.Int64N(maxResolution - minResolution) + minResolution
-                tickSize := mul * res
+                tickMul := rand.Int64N(100) + 1
+                tickRes := rand.Int64N(maxResolution - minResolution) + minResolution
+                tickSize := tickMul * tickRes
 
-                f.Add(tickSize)
+                durMul := rand.Int64N(1000)
+                durRes := rand.Int64N(maxResolution - minResolution) + minResolution
+                dur := durMul * durRes
+
+                f.Add(tickSize, dur)
         }
 
-        f.Fuzz(func(t *testing.T, a int64) {
+        f.Fuzz(func(t *testing.T, a int64, b int64) {
                 epoch := time.Now()
                 clock := NewSimClock(epoch)
                 defer clock.Stop()
 
+                dur := time.Duration(b)
                 tickSize := time.Duration(a)
-                durMul := rand.Int64N(8) + 2 // duration is 2-10x the tickSize
-                dur := time.Duration(durMul * a)
 
-                minTicks := dur / tickSize // min number of ticks that will be required to fire the timer
-                maxTicks := minTicks + 100 // max iterations we are willing to wait
+                minTicks := (dur / tickSize) // min number of ticks before timer is fired
+                maxIters := minTicks + 100
 
                 _, ch := clock.NewTimer(dur)
 
                 fired := false
-                for range maxTicks {
+                for range maxIters {
                         select {
                         case <-ch:
                                 if fired {
