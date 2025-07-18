@@ -29,7 +29,8 @@ func TestTimerIsFiredAtDeadline(t *testing.T) {
 
         dur := 1 * time.Second
         _, ch := clock.NewTimer(dur)
-        expectedDeadline := epoch.Add(dur)
+        tt, ch := clock.NewTimer(dur)
+        timer, _ := tt.(*SimTimer)
 
         tickSize := 100 * time.Millisecond
         minTicks := dur / tickSize
@@ -37,8 +38,8 @@ func TestTimerIsFiredAtDeadline(t *testing.T) {
         for range iters {
                 select {
                 case now := <-ch:
-                        if !now.Equal(expectedDeadline) {
-                                t.Errorf("timer fired too early; fired at %s but should have been fired at %s", now, expectedDeadline)
+                        if !now.Equal(timer.deadline) {
+                                t.Errorf("timer fired at %s but should have been fired at %s", now, timer.deadline)
                         }
                         return
                 default:
@@ -65,7 +66,7 @@ func TestTimerIsFiredAfterDeadline(t *testing.T) {
                 select {
                 case now := <-ch:
                         if !now.After(timer.deadline) {
-                                t.Errorf("timer fired too early; fired at %s but should have been fired after %s", now, timer.deadline)
+                                t.Errorf("timer fired at %s but should have been fired after %s", now, timer.deadline)
                         }
                         return
                 default:
