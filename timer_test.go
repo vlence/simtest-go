@@ -13,7 +13,8 @@ func TestTimerHasExpectedDeadline(t *testing.T) {
         d := 1 * time.Second
         expectedDeadline := epoch.Add(d)
 
-        timer, _ := clock.NewTimer(d).(*SimTimer)
+        tt, _ := clock.NewTimer(d)
+        timer, _ := tt.(*SimTimer)
 
         if !expectedDeadline.Equal(timer.deadline) {
                 t.Errorf("timer's deadline %s does not match expected deadline %s", timer.deadline, expectedDeadline)
@@ -26,13 +27,13 @@ func TestTimerIsFired(t *testing.T) {
         defer clock.Stop()
 
         dur := 1 * time.Second
-        timer, _ := clock.NewTimer(dur).(*SimTimer)
+        _, ch := clock.NewTimer(dur)
         expectedDeadline := epoch.Add(dur)
 
         tickSize := 100 * time.Millisecond
         for range 100 {
                 select {
-                case now := <-timer.C:
+                case now := <-ch:
                         if now.Before(expectedDeadline) {
                                 t.Errorf("timer fired too early; fired at %s but should have been fired after %s", now, expectedDeadline)
                         }
@@ -51,13 +52,13 @@ func TestTimerFiredOnlyOnce(t *testing.T) {
         defer clock.Stop()
 
         dur := 1 * time.Second
-        timer, _ := clock.NewTimer(dur).(*SimTimer)
+        _, ch := clock.NewTimer(dur)
 
         fired := false
         tickSize := 100 * time.Millisecond
         for range 100 {
                 select {
-                case <-timer.C:
+                case <-ch:
                         if fired {
                                 t.Errorf("timer fired twice")
                         }
