@@ -53,3 +53,63 @@ func TestSimClockTickReturnsCurrentTime(t *testing.T) {
                 t.Errorf("time returned by Tick %s not equal to time returned by Now %s", timeReturnedByTick, currentTime)
         }
 }
+
+func TestClockReturnsTimeItWasStoppedAt(t *testing.T) {
+        epoch := time.Now()
+        clock := NewSimClock(epoch)
+        tickSize := 1 * time.Millisecond
+        now := epoch
+
+        for range 100 {
+                now = clock.Tick(tickSize)
+        }
+
+        stoppedAt := clock.Stop()
+
+        if !stoppedAt.Equal(now) {
+                t.Errorf("expected clock to stop at %s but it stopped at %s", now, stoppedAt)
+        }
+}
+
+func TestStoppedClockDoesNotCreateTimer(t *testing.T) {
+        epoch := time.Now()
+        clock := NewSimClock(epoch)
+        clock.Stop()
+
+        timer, ch := clock.NewTimer(1 * time.Second)
+
+        if timer != nil {
+                t.Errorf("stopped clock returned a timer")
+        }
+
+        if ch != nil {
+                t.Errorf("stopped clock returned a timer channel")
+        }
+}
+
+func TestStoppedClockDoesNotTick(t *testing.T) {
+        epoch := time.Now()
+        clock := NewSimClock(epoch)
+        clock.Stop()
+        tickSize := 1 * time.Millisecond
+
+        now := clock.Tick(tickSize)
+
+        if !epoch.Equal(now) {
+                t.Errorf("stopped clock ticked")
+        }
+
+        clock = NewSimClock(epoch)
+
+        for range 100 {
+                now = clock.Tick(tickSize)
+        }
+
+        stoppedAt := clock.Stop()
+
+        now = clock.Tick(tickSize)
+
+        if !stoppedAt.Equal(now) {
+                t.Errorf("stopped clock ticked")
+        }
+}

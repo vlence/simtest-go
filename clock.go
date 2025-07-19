@@ -46,6 +46,7 @@ type timerEvents struct {
 type SimClock struct {
         mu          *sync.RWMutex
         now         time.Time
+        stopped     bool
         timerEvents *timerEvents
 }
 
@@ -54,6 +55,7 @@ func NewSimClock(now time.Time) *SimClock {
         clock := new(SimClock)
         clock.mu = new(sync.RWMutex)
         clock.now = now
+        clock.stopped = false
         clock.timerEvents = &timerEvents{
                 add:    make(chan *SimTimer),
                 remove: make(chan *SimTimer),
@@ -76,16 +78,26 @@ func (clock *SimClock) Now() time.Time {
         return clock.now
 }
 
-// NewTimer returns a *SimTimer.
+// NewTimer returns a *SimTimer. If the clock has been stopped it returns
+// nil for the timer and channel.
 func (clock *SimClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
+        if clock.stopped {
+                return nil, nil
+        }
+
         timer := newSimTimer(clock.Now().Add(d), clock.timerEvents)
         clock.timerEvents.add <- timer
 
         return timer, timer.ch
 }
 
-// NewTicker returns a *SimTicker.
+// NewTicker returns a *SimTicker. If the clock has been stopped it
+// returns nil.
 func (clock *SimClock) NewTicker(d time.Duration) Ticker {
+        if clock.stopped {
+                return nil
+        }
+
         ch := make(chan time.Time)
         ticker := newSimTicker(d, (<-chan time.Time)(ch), clock)
 
@@ -93,8 +105,13 @@ func (clock *SimClock) NewTicker(d time.Duration) Ticker {
 }
 
 // Tick moves the clock's time forward by tickSize and returns
-// the current time.
+// the current time. If the clock has been stopped it does
+// nothing and returns the time when the clock was stopped.
 func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
+        if clock.stopped {
+                return clock.now
+        }
+
         clock.mu.Lock()
         defer clock.mu.Unlock()
 
@@ -109,7 +126,7 @@ func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
 // Stop stops this clock and its associated timers and tickers.
 // Any pending timers and tickers are never fired after Stop is
 // called.
-func (clock *SimClock) Stop() {
+func (clock *SimClock) Stop() time.Time {
         clock.mu.Lock()
         defer clock.mu.Unlock()
 
@@ -118,6 +135,10 @@ func (clock *SimClock) Stop() {
         close(clock.timerEvents.remove)
         close(clock.timerEvents.stop)
         close(clock.timerEvents.tick)
+
+        clock.stopped = true
+
+        return clock.now
 }
 
 // listenForTimerEvents starts a goroutine that adds timers to
