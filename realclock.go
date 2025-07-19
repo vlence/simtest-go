@@ -22,6 +22,11 @@ func (*realClock) NewTicker(d time.Duration) Ticker {
         return time.NewTicker(d)
 }
 
+// Sleep blocks this goroutine for d amount of time.
+func (*realClock) Sleep(d time.Duration) {
+        time.Sleep(d)
+}
+
 // RealClock represents real world time. Calling Now on RealClock
 // will always return your system's current time. Use this to tell
 // the time when running your app in production.

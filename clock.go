@@ -19,6 +19,9 @@ type Clock interface {
 
         // NewTicker returns a ticker that fires every d intervals.
         NewTicker(d time.Duration) Ticker
+
+        // Sleep blocks this goroutine for d amount of time.
+        Sleep(d time.Duration)
 }
 
 // timerEvents represents all the timer events that can been
