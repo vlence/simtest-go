@@ -13,19 +13,19 @@ of [ThePrimeagen talking with Joran Greef](https://www.youtube.com/watch?v=sC1B3
 
 Unit tests are great for testing the behaviour of your application. When you find a new bug you
 can write another unit test to test for that bug's presence. If in the future you refactor or
-add a new feature and the bug appears again the unit test will catch. However unit tests cannot
+add a new feature and the bug appears again the unit test will catch it. However unit tests cannot
 find new bugs.
 
 Fuzzing can be used to find new bugs. In case you don't know what fuzzing is it just means
 generating random data and observing how your application behaves. Fuzzing is a great way to find
-how well our applications can handle data that it's not expecting. When new bugs are found by
+how well your application can handle data that it's not expecting. When new bugs are found by
 fuzzing we can then create unit tests for them. 
 
-To really put our application through the paces we need to be able to simulate that kind of faults
+To really put our application through the paces we need to be able to simulate the kind of faults
 that can happen in the real world. In the real world tasks can take longer than expected, the
 network is not reliable, disks fail, etc. One way to simulate these kind of faults is to use
 `io.Reader` and `io.Writer` implementations that inject these faults. For example to simulate
-high read latency one could wait for some time before starting the actual read operation.
+high read latency we could wait for some time before starting the actual read operation.
 
 ```go
 type HighLatencyReader {
@@ -43,9 +43,13 @@ func (r *HighLatencyReader) Read(p []byte) (int, error) {
 ```
 
 There's however the problem of time as well. Consider our previous example of introducing latency
-into a read operations. We are waiting for 1 second. If we are running this in our tests our test
-will need to wait 1 second for the faulty read to complete. We need some way to make our application
-think time has passed without actually waiting that long.
+into read operations. We are waiting for 1 second. If we are running this in our tests our test
+will need to wait 1 second for the faulty read to complete. There's nothing wrong in this if we can
+prove that our application works correctly or find new bugs but it is better if we can do all of
+that and also not have to wait that long. 1 second is not a long time but there are a lot of
+scenarios where you might have to wait much longer. For example you might have a response timeout
+of 3s for HTTP requests. If you have 100s of endpoints in your application then that's a lot of
+waiting!
 
 It's fairly common to think of things like the network and disk as dependencies and to mock them
 during tests. What is uncommon, as far as I know, is to think of time itself as some kind of
