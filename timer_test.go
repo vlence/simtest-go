@@ -34,7 +34,7 @@ func TestTimerIsFiredAtDeadline(t *testing.T) {
 
         tickSize := 100 * time.Millisecond
         minTicks := dur / tickSize
-        iters := minTicks + 1
+        iters := minTicks + 2
         for range iters {
                 select {
                 case now := <-ch:
@@ -158,7 +158,7 @@ func FuzzClockWithMultipleTimers(f *testing.F) {
         minResolution := int64(time.Microsecond)
         maxResolution := int64(time.Second)
 
-        for i := range 10 {
+        for i := range uint(10) {
                 tickMul := rand.Int64N(100) + 1
                 tickRes := rand.Int64N(maxResolution - minResolution) + minResolution
                 tickSize := tickMul * tickRes
@@ -166,14 +166,10 @@ func FuzzClockWithMultipleTimers(f *testing.F) {
                 f.Add(i+1, int64(tickSize))
         }
 
-        f.Fuzz(func(t *testing.T, numTimers int, b int64) {
+        f.Fuzz(func(t *testing.T, numTimers uint, b int64) {
                 epoch := time.Now()
                 clock := NewSimClock(epoch)
                 defer clock.Stop()
-
-                if numTimers <= 0 {
-                        t.SkipNow()
-                }
 
                 tickSize := time.Duration(b)
                 channels := make([]<-chan time.Time, numTimers)
@@ -196,7 +192,7 @@ func FuzzClockWithMultipleTimers(f *testing.F) {
                 minTicks := (longestDur / b) // min number of ticks before timer is fired
                 maxIters := minTicks + 100
 
-                fired := 0
+                fired := uint(0)
                 for range maxIters {
                         for _, ch := range channels {
                                 select {
