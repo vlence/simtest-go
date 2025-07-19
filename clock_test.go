@@ -113,3 +113,83 @@ func TestStoppedClockDoesNotTick(t *testing.T) {
                 t.Errorf("stopped clock ticked")
         }
 }
+
+func TestTimeMovesForwardWhenClockSleeps(t *testing.T) {
+        epoch := time.Now()
+        clock := NewSimClock(epoch)
+        tickSize := 1 * time.Millisecond
+        sleepDuration := 1 * time.Second
+        expectedTimeAfterSleeping := epoch.Add(sleepDuration)
+
+        done := false
+        doneCh := make(chan bool, 1)
+        go func() {
+                clock.Sleep(sleepDuration)
+                doneCh <- true
+        }()
+
+        for !done {
+                select {
+                case <- doneCh:
+                        done = true
+                default:
+                        clock.Tick(tickSize)
+                }
+        }
+
+        now := clock.Now()
+
+        if now.Before(expectedTimeAfterSleeping) {
+                t.Errorf("expected time to be after %s but current time is %s", expectedTimeAfterSleeping, now)
+        }
+}
+
+func TestTimersAreFiredWhileSleeping(t *testing.T) {
+        testTimersAreFiredWhileSleeping(t, 10 * time.Second, 1 * time.Second, 1 * time.Millisecond)
+}
+
+func FuzzTimersAreFiredWhileSleeping(f *testing.F) {
+        f.Add(int64(10 * time.Second), int64(1 * time.Second), int64(1 * time.Millisecond))
+
+        f.Fuzz(func(t *testing.T, sleepDuration, timerDuration, tickSize int64) {
+                if sleepDuration <= timerDuration {
+                        // timer duration needs to be lesser than sleep duration
+                        t.SkipNow()
+                }
+
+                testTimersAreFiredWhileSleeping(t, time.Duration(sleepDuration), time.Duration(timerDuration), time.Duration(tickSize))
+        })
+}
+
+func testTimersAreFiredWhileSleeping(t *testing.T, sleepDuration, timerDuration, tickSize time.Duration) {
+        epoch := time.Now()
+        clock := NewSimClock(epoch)
+
+        fired := false
+        slept := false
+        sleptChannel := make(chan bool, 1)
+        _, firedChannel := clock.NewTimer(timerDuration)
+
+        go func() {
+                clock.Sleep(sleepDuration)
+                sleptChannel <- true
+        }()
+
+        for !slept {
+                select {
+                case <-sleptChannel:
+                        slept = true
+                case <-firedChannel:
+                        fired = true
+                        if slept {
+                                t.Errorf("timer did not fired while clock was still sleeping")
+                        }
+                default:
+                        clock.Tick(tickSize)
+                }
+        }
+
+        if slept && !fired {
+                t.Errorf("clock finished sleeping but timer did not fire")
+        }
+}

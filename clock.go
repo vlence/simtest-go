@@ -41,13 +41,28 @@ type timerEvents struct {
         tick chan time.Time
 }
 
+type sleepDeadline struct {
+        ch chan time.Time
+        deadline time.Time
+}
+
+type sleepEvents struct {
+        add chan *sleepDeadline
+        tick chan time.Time
+        stop chan bool
+}
+
 // SimClock represents a simulated clock. The clock moves forward
-// in time only when Tick is called.
+// in time only when Tick is called. Care must be taken that Sleep,
+// timers and tickers are not used in the same goroutine as the one
+// where Tick is called; you will deadlock.
 type SimClock struct {
         mu          *sync.RWMutex
         now         time.Time
         stopped     bool
+        sleepEvents *sleepEvents
         timerEvents *timerEvents
+        sleepTickSize time.Duration
 }
 
 // NewSimClock returns a SimClock whose current time is now.
@@ -56,6 +71,8 @@ func NewSimClock(now time.Time) *SimClock {
         clock.mu = new(sync.RWMutex)
         clock.now = now
         clock.stopped = false
+        clock.sleepTickSize = 1 * time.Microsecond
+
         clock.timerEvents = &timerEvents{
                 add:    make(chan *SimTimer),
                 remove: make(chan *SimTimer),
@@ -63,7 +80,14 @@ func NewSimClock(now time.Time) *SimClock {
                 tick:   make(chan time.Time),
         }
 
+        clock.sleepEvents = &sleepEvents{
+                add: make(chan *sleepDeadline),
+                tick: make(chan time.Time),
+                stop: make(chan bool),
+        }
+
         go clock.listenForTimerEvents()
+        go clock.listenForSleepEvents()
 
         return clock
 }
@@ -104,6 +128,37 @@ func (clock *SimClock) NewTicker(d time.Duration) Ticker {
         return ticker
 }
 
+// SetSleepTickSize sets the speed at which this clock will tick
+// while sleeping. By default this tick size is 1 microsecond.
+func (clock *SimClock) SetSleepTickSize(d time.Duration) {
+        clock.mu.Lock()
+        defer clock.mu.Unlock()
+
+        clock.sleepTickSize = d
+}
+
+// Sleep blocks this goroutine for d amount of time. If you
+// sleep in the same goroutine that ticks this clock then
+// you will be in a deadlock.
+func (clock *SimClock) Sleep(d time.Duration) {
+        if clock.stopped {
+                return
+        }
+
+        // time.Sleep is designed to block the current goroutine
+        // until the given duration d has passed. We don't want
+        // to do that here because that would mean timers and
+        // tickers wouldn't be fired. So we just get the current
+        // time and tick until the clock has moved forward by d
+        // amount of time.
+        ch := make(chan time.Time, 1)
+        now := clock.Now()
+        deadline := now.Add(d)
+
+        clock.sleepEvents.add <- &sleepDeadline{ch, deadline}
+        <-ch
+}
+
 // Tick moves the clock's time forward by tickSize and returns
 // the current time. If the clock has been stopped it does
 // nothing and returns the time when the clock was stopped.
@@ -119,6 +174,7 @@ func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
         clock.now = now
 
         clock.timerEvents.tick <- now
+        clock.sleepEvents.tick <- now
 
         return now
 }
@@ -187,5 +243,30 @@ func (clock *SimClock) listenForTimerEvents() {
                                 return
                         }
                 }
+        }
+}
+
+func (clock *SimClock) listenForSleepEvents() {
+        var yes bool
+        var deadlines map[time.Time]chan time.Time
+
+        deadlines = make(map[time.Time]chan time.Time)
+        
+        for {
+                select {
+                case sd := <-clock.sleepEvents.add:
+                       deadlines[sd.deadline] = sd.ch
+                case now := <-clock.sleepEvents.tick:
+                       for deadline, ch := range deadlines {
+                               if deadline.Equal(now) || now.After(deadline) {
+                                       ch <- now
+                                       delete(deadlines, deadline)
+                               }
+                       }
+               case yes = <-clock.sleepEvents.stop:
+                       if yes {
+                               return
+                       }
+               }
         }
 }
