@@ -52,10 +52,10 @@ of 3s for HTTP requests. If you have 100s of endpoints in your application then 
 waiting!
 
 It's fairly common to think of things like the network and disk as dependencies and to mock them
-during tests. What is uncommon, as far as I know, is to think of time itself as some kind of
-dependency. If we can simulate time then we can make it go faster, call timers and ticks sooner,
+during tests. What is uncommon, as far as I know, is to think of time itself as a dependency.
+If we can simulate time then we can make it go faster, fire timers and tickers sooner,
 sleep faster, etc. A simple way to do this is to have an interface for a clock that can tell the
-current time and create timers and suchlike. The clock can tick at a rate of our choosing and we
+current time, create timers. sleep, etc. The clock can tick at a rate of our choosing and we
 can make time go faster. Our earlier example can be rewritten like this:
 
 ```go
@@ -73,3 +73,5 @@ func (r *HighLatencyReader) Read(p []byte) (int, error) {
     return r.Reader.Read(p)
 }
 ```
+
+`clock` can tick at its own rate and thus make `Sleep` return much sooner than 1s.
