@@ -110,6 +110,9 @@ func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
 // Any pending timers and tickers are never fired after Stop is
 // called.
 func (clock *SimClock) Stop() {
+        clock.mu.Lock()
+        defer clock.mu.Unlock()
+
         clock.timerEvents.stop <- true
         close(clock.timerEvents.add)
         close(clock.timerEvents.remove)
