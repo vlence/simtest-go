@@ -32,11 +32,11 @@ network is not reliable, disks fail, etc. One way to simulate these kind of faul
 high read latency we could wait for some time before starting the actual read operation.
 
 ```go
-type HighLatencyReader {
+type HighLatencyReader struct {
     io.Reader
 }
 
-func NewHighLatencyReader(r io.Reader) {
+func NewHighLatencyReader(r io.Reader) *HighLatencyReader {
     return &HighLatencyReader{r}
 }
 
@@ -63,12 +63,12 @@ current time, create timers. sleep, etc. The clock can tick at a rate of our cho
 can make time go faster. Our earlier example can be rewritten like this:
 
 ```go
-type HighLatencyReader {
+type HighLatencyReader struct {
     io.Reader
     clock Clock
 }
 
-func NewHighLatencyReader(r io.Reader, clock *Clock) {
+func NewHighLatencyReader(r io.Reader, clock *Clock) *HighLatencyReader {
     return &HighLatencyReader{r, clock}
 }
 
