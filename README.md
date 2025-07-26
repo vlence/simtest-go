@@ -79,3 +79,10 @@ func (r *HighLatencyReader) Read(p []byte) (int, error) {
 ```
 
 `clock` can tick at its own rate and thus make `Sleep` return much sooner than 1s.
+
+### A Simulated Clock
+
+`simtest` exports an interface `Clock` which can be used to tell the current time, sleep, create
+timers, and create tickers. To simulate time it exports `SimClock` which is an implementation of
+`Clock`. `SimClock` is entirely in control of the caller and does not progress unless `Tick` is
+called.
