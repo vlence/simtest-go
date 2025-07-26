@@ -1,15 +1,15 @@
 package simtest
 
 import (
-	"sync"
-	"time"
+        "sort"
+        "sync"
+        "time"
 
-	"github.com/vlence/gossert"
+        "github.com/vlence/gossert"
 )
 
-// A Clock reports the current time whenever Now is called.
-// An application should use the same clock everywhere to
-// tell the time.
+// A Clock returns the current time and can create timers and tickers. An
+// application should use the same clock everywhere.
 type Clock interface {
         // Now returns the current time.
         Now() time.Time
@@ -24,103 +24,96 @@ type Clock interface {
         Sleep(d time.Duration)
 }
 
-// timerEvents represents all the timer events that can been
-// happen. See Clock.listenForTimerEvents to see how the channels
-// are used.
-type timerEvents struct {
-        // Newly created timers should be sent to this channel.
-        add chan *SimTimer
-
-        // Timers that have been fired or stopped should be sent to this channel.
-        remove chan *SimTimer
-
-        // Send true to this channel to stop listening for timer events.
-        stop chan bool
-
-        // Send clock ticks to this channel.
-        tick chan time.Time
-}
-
-type sleepDeadline struct {
-        ch chan time.Time
-        deadline time.Time
-}
-
-type sleepEvents struct {
-        add chan *sleepDeadline
-        tick chan time.Time
-        stop chan bool
-}
-
-// SimClock represents a simulated clock. The clock moves forward
-// in time only when Tick is called. Care must be taken that Sleep,
-// timers and tickers are not used in the same goroutine as the one
-// where Tick is called; you will deadlock.
+// SimClock is a simulated clock. The clock moves forward
+// in time only when Tick is called. Every simulated clock
+// runs a goroutine in the background that manages callbacks
+// like sleeps, timers, and tickers. Some of its methods are
+// not safe for use within the same goroutine. Read the
+// documentation of Tick, NewTimer, NewTicker, and Sleep.
 type SimClock struct {
-        mu          *sync.RWMutex
-        now         time.Time
-        stopped     bool
-        sleepEvents *sleepEvents
-        timerEvents *timerEvents
-        sleepTickSize time.Duration
+        // Use this mutex to sync reads and writes to now.
+        nowMu *sync.RWMutex
+
+        // Use this mutex to sync reads and writes to stopped.
+        stopMu *sync.RWMutex
+
+        // The current time of the clock. Call Now to get this value
+        // in a thread safe manner.
+        now time.Time
+
+        // This is true if this clock has been stopped. Call isStopped
+        // to get this value in a thread safe manner.
+        stopped bool
+
+        // Send the current time to the event manager goroutine on every
+        // tick.
+        tickCh chan time.Time
+
+        // Send true to this channel to stop the event manager goroutine.
+        stopCh chan bool
+
+        // Send event updates to this channel to update events.
+        eventUpdateCh chan *eventUpdate
+
+        // Send new events to this channel to register new events.
+        registerEventCh chan *event
 }
 
 // NewSimClock returns a SimClock whose current time is now.
 func NewSimClock(now time.Time) *SimClock {
         clock := new(SimClock)
-        clock.mu = new(sync.RWMutex)
+        clock.nowMu = new(sync.RWMutex)
+        clock.stopMu = new(sync.RWMutex)
         clock.now = now
-        clock.stopped = false
-        clock.sleepTickSize = 1 * time.Microsecond
+        clock.stopCh = make(chan bool)
+        clock.tickCh = make(chan time.Time)
+        clock.eventUpdateCh = make(chan *eventUpdate)
+        clock.registerEventCh = make(chan *event)
 
-        clock.timerEvents = &timerEvents{
-                add:    make(chan *SimTimer),
-                remove: make(chan *SimTimer),
-                stop:   make(chan bool),
-                tick:   make(chan time.Time),
-        }
-
-        clock.sleepEvents = &sleepEvents{
-                add: make(chan *sleepDeadline),
-                tick: make(chan time.Time),
-                stop: make(chan bool),
-        }
-
-        go clock.listenForTimerEvents()
-        go clock.listenForSleepEvents()
+        go clock.eventManager()
 
         return clock
 }
 
-// Now returns the current time. To move
-// the time forward call Tick. Repeated calls to Now will return
-// the same time until Tick is called.
+// Now returns the current time. To move the time forward call Tick.
 func (clock *SimClock) Now() time.Time {
-        clock.mu.RLock()
-        defer clock.mu.RUnlock()
+        clock.nowMu.RLock()
+        defer clock.nowMu.RUnlock()
 
         return clock.now
 }
 
-// NewTimer returns a *SimTimer. If the clock has been stopped it returns
-// nil for the timer and channel.
+// NewTimer creates and returns a simulated timer. The simulated timer fires
+// after d amount of time has passed i.e. it fires if Tick has been called
+// enough times to simulate d amount of time passing. Care must be taken to
+// not create a simulated timer and wait for it to expire in the same
+// goroutine that calls Tick because it can deadlock. NewTimer panics
+// if the clock has been stopped.
 func (clock *SimClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
-        if clock.stopped {
-                return nil, nil
+        gossert.Ok(!clock.isStopped(), "simclock: creating new timer using stopped clock")
+
+        clock.nowMu.RLock()
+        defer clock.nowMu.RUnlock()
+
+        timer := &simTimer{
+                event{
+                        d:       d,
+                        ch:      make(chan time.Time),
+                        when:    clock.now.Add(d),
+                        repeat:  false,
+                        stopped: false,
+                },
+                clock,
         }
 
-        timer := newSimTimer(clock.Now().Add(d), clock.timerEvents)
-        clock.timerEvents.add <- timer
+        clock.registerEventCh <- &timer.event
 
         return timer, timer.ch
 }
 
-// NewTicker returns a *SimTicker. If the clock has been stopped it
-// returns nil.
+// NewTicker returns a *SimTicker. NewTicker panics if the clock has been stopped.
 func (clock *SimClock) NewTicker(d time.Duration) Ticker {
-        if clock.stopped {
-                return nil
-        }
+        gossert.Ok(!clock.isStopped(), "simclock: creating new ticker using stopped clock")
 
         ch := make(chan time.Time)
         ticker := newSimTicker(d, (<-chan time.Time)(ch), clock)
@@ -128,145 +121,136 @@ func (clock *SimClock) NewTicker(d time.Duration) Ticker {
         return ticker
 }
 
-// SetSleepTickSize sets the speed at which this clock will tick
-// while sleeping. By default this tick size is 1 microsecond.
-func (clock *SimClock) SetSleepTickSize(d time.Duration) {
-        clock.mu.Lock()
-        defer clock.mu.Unlock()
-
-        clock.sleepTickSize = d
-}
-
-// Sleep blocks this goroutine for d amount of time. If you
-// sleep in the same goroutine that ticks this clock then
-// you will be in a deadlock.
+// Sleep simulates blocking this goroutine for d amount of time. This
+// function will return once Tick has been called enough times to
+// simulate d amount of time passing. Care must be taken to ensure Sleep
+// and Tick are not called from the same goroutine. If they're called
+// from the same goroutine the program will deadlock. Sleep will panic
+// if the clock has been stopped.
 func (clock *SimClock) Sleep(d time.Duration) {
-        if clock.stopped {
-                return
+        gossert.Ok(!clock.isStopped(), "simclock: sleeping a stopped clock")
+
+        ev := &event{
+                d:       d,
+                ch:      make(chan time.Time),
+                when:    clock.Now().Add(d),
+                repeat:  false,
+                stopped: false,
         }
 
-        // time.Sleep is designed to block the current goroutine
-        // until the given duration d has passed. We don't want
-        // to do that here because that would mean timers and
-        // tickers wouldn't be fired. So we just get the current
-        // time and tick until the clock has moved forward by d
-        // amount of time.
-        ch := make(chan time.Time, 1)
-        now := clock.Now()
-        deadline := now.Add(d)
+        clock.registerEventCh <- ev
 
-        clock.sleepEvents.add <- &sleepDeadline{ch, deadline}
-        <-ch
+        <-ev.ch
 }
 
 // Tick moves the clock's time forward by tickSize and returns
-// the current time. If the clock has been stopped it does
-// nothing and returns the time when the clock was stopped.
+// the current time. All registered events that need to be fired
+// next will be fired. This method will block the goroutine and
+// can lead to a deadlock in certain situations. For example if
+// you call Sleep and Tick in the same goroutine, that goroutine
+// will deadlock. Tick will panic if the clock has been stopped.
 func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
-        if clock.stopped {
-                return clock.now
-        }
+        gossert.Ok(!clock.isStopped(), "simclock: ticking a stopped clock")
 
-        clock.mu.Lock()
-        defer clock.mu.Unlock()
+        clock.nowMu.Lock()
+        defer clock.nowMu.Unlock()
 
         now := clock.now.Add(tickSize)
         clock.now = now
 
-        clock.timerEvents.tick <- now
-        clock.sleepEvents.tick <- now
+        clock.tickCh <- now
 
         return now
 }
 
-// Stop stops this clock and its associated timers and tickers.
-// Any pending timers and tickers are never fired after Stop is
-// called.
-func (clock *SimClock) Stop() time.Time {
-        clock.mu.Lock()
-        defer clock.mu.Unlock()
+// updateEvent sends an event update request to the background goroutine that manages
+// the events. updateEvent will panic if the clock has been stopped.
+func (clock *SimClock) updateEvent(d time.Duration, event *event) {
+        gossert.Ok(!clock.isStopped(), "simclock: updating event of stopped clock")
+        gossert.Ok(event != nil, "simclock: trying to update nil event")
 
-        clock.timerEvents.stop <- true
-        close(clock.timerEvents.add)
-        close(clock.timerEvents.remove)
-        close(clock.timerEvents.stop)
-        close(clock.timerEvents.tick)
-
-        clock.stopped = true
-
-        return clock.now
+        clock.eventUpdateCh <- &eventUpdate{d, event}
 }
 
-// listenForTimerEvents starts a goroutine that adds timers to
-// a watchlist, fires them when they've reached their deadline
-// and removes them from the watchlist.
-//
-// When a new timer is created it should be sent to addTimerChan.
-// If not sent then the timer will never be fired even if it's
-// deadline has passed.
-//
-// When the clock ticks it should send the correct time to
-// timerTickChan. All timers are checked and the ones whose
-// deadline has been reached are fired. Timers are automatically
-// removed from the watchlist after they're fired.
-//
-// If a timer is stopped by calling Stop it should be sent to
-// removeTimerChan to remove it from the watchlist.
-func (clock *SimClock) listenForTimerEvents() {
-        var yes bool
-        var now time.Time
-        var timer *SimTimer
-        var timers map[*SimTimer]bool
-
-        timers = make(map[*SimTimer]bool)
+// eventManager manages events. It accepts new events to be registered,
+// updates them and fires them once they have expired. eventManager
+// must be run as a separate goroutine.
+func (clock *SimClock) eventManager() {
+        events := make(callbacks, 0)
 
         for {
                 select {
-                case timer = <-clock.timerEvents.add:
-                        timers[timer] = true
+                case newEvent := <-clock.registerEventCh:
+                        events.Register(newEvent)
 
-                case timer = <-clock.timerEvents.remove:
-                        delete(timers, timer)
+                case update := <-clock.eventUpdateCh:
+                        d, event := update.d, update.event
+                        gossert.Ok(event != nil, "simclock: trying to update nil event")
 
-                case now = <-clock.timerEvents.tick:
-                        for timer = range timers {
-                                gossert.Ok(!timer.stopped, "simclock: stopped timer not removed from watchlist")
+                        if d < 0 {
+                                event.stopped = true
+                                break
+                        }
 
-                                fired := timer.fire(now)
+                        event.d = d
+                        event.when = clock.Now().Add(d)
+                        sort.Sort(events)
 
-                                if fired {
-                                        delete(timers, timer)
+                case now := <-clock.tickCh:
+                        // execute callbacks that have expired.
+                        for event := events.peek(); event != nil && !now.Before(event.when); event = events.peek() {
+                                gossert.Ok(event == events.next(), "simclock: peeked callback is not same as popped callback")
+
+                                if event.stopped {
+                                        continue
                                 }
+
+                                event.ch <- now
+
+                                if !event.repeat {
+                                        event.stopped = true
+                                        continue
+                                }
+
+                                event.when = event.when.Add(event.d)
+                                events.Register(event)
                         }
-                case yes = <-clock.timerEvents.stop:
-                        if yes {
-                                return
+
+                case <-clock.stopCh:
+                        for event := events.next(); event != nil; event = events.next() {
+                                event.stopped = true
+                                close(event.ch)
                         }
+                        return
                 }
         }
 }
 
-func (clock *SimClock) listenForSleepEvents() {
-        var yes bool
-        var deadlines map[time.Time]chan time.Time
+// isStopped returns true if this clock has been stopped.
+func (clock *SimClock) isStopped() bool {
+        clock.stopMu.RLock()
+        defer clock.stopMu.RUnlock()
 
-        deadlines = make(map[time.Time]chan time.Time)
-        
-        for {
-                select {
-                case sd := <-clock.sleepEvents.add:
-                       deadlines[sd.deadline] = sd.ch
-                case now := <-clock.sleepEvents.tick:
-                       for deadline, ch := range deadlines {
-                               if deadline.Equal(now) || now.After(deadline) {
-                                       ch <- now
-                                       delete(deadlines, deadline)
-                               }
-                       }
-               case yes = <-clock.sleepEvents.stop:
-                       if yes {
-                               return
-                       }
-               }
+        return clock.stopped
+}
+
+// stop stops this clock. Channels of all pending events are closed.
+func (clock *SimClock) stop() bool {
+        clock.stopMu.Lock()
+        defer clock.stopMu.Unlock()
+
+        if clock.stopped {
+                return false
         }
+
+        clock.stopCh <- true
+
+        close(clock.tickCh)
+        close(clock.stopCh)
+        close(clock.registerEventCh)
+        close(clock.eventUpdateCh)
+
+        clock.stopped = true
+
+        return true
 }
