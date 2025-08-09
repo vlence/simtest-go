@@ -77,6 +77,8 @@ func NewSimClock(now time.Time) *SimClock {
 
 // Now returns the current time. To move the time forward call Tick.
 func (clock *SimClock) Now() time.Time {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
+
         clock.nowMu.RLock()
         defer clock.nowMu.RUnlock()
 
@@ -90,6 +92,7 @@ func (clock *SimClock) Now() time.Time {
 // goroutine that calls Tick because it can deadlock. NewTimer panics
 // if the clock has been stopped.
 func (clock *SimClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
         gossert.Ok(!clock.isStopped(), "simclock: creating new timer using stopped clock")
 
         clock.nowMu.RLock()
@@ -113,6 +116,7 @@ func (clock *SimClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
 
 // NewTicker returns a *SimTicker. NewTicker panics if the clock has been stopped.
 func (clock *SimClock) NewTicker(d time.Duration) Ticker {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
         gossert.Ok(!clock.isStopped(), "simclock: creating new ticker using stopped clock")
 
         ch := make(chan time.Time)
@@ -128,6 +132,7 @@ func (clock *SimClock) NewTicker(d time.Duration) Ticker {
 // from the same goroutine the program will deadlock. Sleep will panic
 // if the clock has been stopped.
 func (clock *SimClock) Sleep(d time.Duration) {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
         gossert.Ok(!clock.isStopped(), "simclock: sleeping a stopped clock")
 
         ev := &event{
@@ -150,6 +155,7 @@ func (clock *SimClock) Sleep(d time.Duration) {
 // you call Sleep and Tick in the same goroutine, that goroutine
 // will deadlock. Tick will panic if the clock has been stopped.
 func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
         gossert.Ok(!clock.isStopped(), "simclock: ticking a stopped clock")
 
         clock.nowMu.Lock()
@@ -166,6 +172,8 @@ func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
 // updateEvent sends an event update request to the background goroutine that manages
 // the events. updateEvent will panic if the clock has been stopped.
 func (clock *SimClock) updateEvent(d time.Duration, event *event) {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
+
         gossert.Ok(!clock.isStopped(), "simclock: updating event of stopped clock")
         gossert.Ok(event != nil, "simclock: trying to update nil event")
 
@@ -176,6 +184,8 @@ func (clock *SimClock) updateEvent(d time.Duration, event *event) {
 // updates them and fires them once they have expired. eventManager
 // must be run as a separate goroutine.
 func (clock *SimClock) eventManager() {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
+
         events := make(callbacks, 0)
 
         for {
@@ -228,6 +238,8 @@ func (clock *SimClock) eventManager() {
 
 // isStopped returns true if this clock has been stopped.
 func (clock *SimClock) isStopped() bool {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
+
         clock.stopMu.RLock()
         defer clock.stopMu.RUnlock()
 
@@ -236,6 +248,8 @@ func (clock *SimClock) isStopped() bool {
 
 // stop stops this clock. Channels of all pending events are closed.
 func (clock *SimClock) stop() bool {
+        gossert.Ok(nil != clock, "simclock: clock is nil")
+
         clock.stopMu.Lock()
         defer clock.stopMu.Unlock()
 
