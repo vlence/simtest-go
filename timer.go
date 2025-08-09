@@ -21,7 +21,7 @@ type Timer interface {
 // simulated clock cannot progress forward until a receiver receives from the
 // timer's channel.
 type simTimer struct {
-        event
+        event simClockEvent
         clock *SimClock
 }
 
@@ -41,7 +41,7 @@ func (timer *simTimer) Reset(d time.Duration) bool {
                 d = 0
         }
 
-        timer.clock.updateEvent(d, &timer.event)
+        timer.clock.updateEvent(d, &timer.simClockEvent)
 
         return true
 }
@@ -56,7 +56,7 @@ func (timer *simTimer) Stop() bool {
                 return false
         }
 
-        timer.clock.updateEvent(-1, &timer.event)
+        timer.clock.updateEvent(-1, &timer.simClockEvent)
 
         return true
 }

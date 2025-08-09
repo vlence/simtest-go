@@ -9,7 +9,7 @@ import (
 )
 
 // A Clock returns the current time and can create timers and tickers. An
-// application should use the same clock everywhere.
+// application should use the same clock throughout its execution.
 type Clock interface {
         // Now returns the current time.
         Now() time.Time
@@ -31,11 +31,11 @@ type Clock interface {
 // not safe for use within the same goroutine. Read the
 // documentation of Tick, NewTimer, NewTicker, and Sleep.
 type SimClock struct {
-        // Use this mutex to sync reads and writes to now.
+        // Mutex to sync reads and writes to now.
         nowMu *sync.RWMutex
 
-        // Use this mutex to sync reads and writes to stopped.
-        stopMu *sync.RWMutex
+        // Mutex to sync reads and writes to stopped.
+        stoppedMu *sync.RWMutex
 
         // The current time of the clock. Call Now to get this value
         // in a thread safe manner.
@@ -53,22 +53,22 @@ type SimClock struct {
         stopCh chan bool
 
         // Send event updates to this channel to update events.
-        eventUpdateCh chan *eventUpdate
+        eventUpdateCh chan *simClockEventUpdate
 
         // Send new events to this channel to register new events.
-        registerEventCh chan *event
+        registerEventCh chan *simClockEvent
 }
 
 // NewSimClock returns a SimClock whose current time is now.
 func NewSimClock(now time.Time) *SimClock {
         clock := new(SimClock)
         clock.nowMu = new(sync.RWMutex)
-        clock.stopMu = new(sync.RWMutex)
+        clock.stoppedMu = new(sync.RWMutex)
         clock.now = now
         clock.stopCh = make(chan bool)
         clock.tickCh = make(chan time.Time)
-        clock.eventUpdateCh = make(chan *eventUpdate)
-        clock.registerEventCh = make(chan *event)
+        clock.eventUpdateCh = make(chan *simClockEventUpdate)
+        clock.registerEventCh = make(chan *simClockEvent)
 
         go clock.eventManager()
 
@@ -95,21 +95,18 @@ func (clock *SimClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
         gossert.Ok(nil != clock, "simclock: clock is nil")
         gossert.Ok(!clock.isStopped(), "simclock: creating new timer using stopped clock")
 
-        clock.nowMu.RLock()
-        defer clock.nowMu.RUnlock()
-
         timer := &simTimer{
-                event{
+                simClockEvent{
                         d:       d,
                         ch:      make(chan time.Time),
-                        when:    clock.now.Add(d),
+                        when:    clock.Now().Add(d),
                         repeat:  false,
                         stopped: false,
                 },
                 clock,
         }
 
-        clock.registerEventCh <- &timer.event
+        clock.registerEventCh <- &timer.simClockEvent
 
         return timer, timer.ch
 }
@@ -125,7 +122,7 @@ func (clock *SimClock) NewTicker(d time.Duration) Ticker {
         return ticker
 }
 
-// Sleep simulates blocking this goroutine for d amount of time. This
+// Sleep blocks this goroutine for d amount of time. This
 // function will return once Tick has been called enough times to
 // simulate d amount of time passing. Care must be taken to ensure Sleep
 // and Tick are not called from the same goroutine. If they're called
@@ -135,7 +132,7 @@ func (clock *SimClock) Sleep(d time.Duration) {
         gossert.Ok(nil != clock, "simclock: clock is nil")
         gossert.Ok(!clock.isStopped(), "simclock: sleeping a stopped clock")
 
-        ev := &event{
+        ev := &simClockEvent{
                 d:       d,
                 ch:      make(chan time.Time),
                 when:    clock.Now().Add(d),
@@ -171,13 +168,13 @@ func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
 
 // updateEvent sends an event update request to the background goroutine that manages
 // the events. updateEvent will panic if the clock has been stopped.
-func (clock *SimClock) updateEvent(d time.Duration, event *event) {
+func (clock *SimClock) updateEvent(d time.Duration, event *simClockEvent) {
         gossert.Ok(nil != clock, "simclock: clock is nil")
 
         gossert.Ok(!clock.isStopped(), "simclock: updating event of stopped clock")
         gossert.Ok(event != nil, "simclock: trying to update nil event")
 
-        clock.eventUpdateCh <- &eventUpdate{d, event}
+        clock.eventUpdateCh <- &simClockEventUpdate{d, event}
 }
 
 // eventManager manages events. It accepts new events to be registered,
@@ -186,7 +183,7 @@ func (clock *SimClock) updateEvent(d time.Duration, event *event) {
 func (clock *SimClock) eventManager() {
         gossert.Ok(nil != clock, "simclock: clock is nil")
 
-        events := make(callbacks, 0)
+        events := make(registeredSimClockEvents, 0)
 
         for {
                 select {
@@ -240,8 +237,8 @@ func (clock *SimClock) eventManager() {
 func (clock *SimClock) isStopped() bool {
         gossert.Ok(nil != clock, "simclock: clock is nil")
 
-        clock.stopMu.RLock()
-        defer clock.stopMu.RUnlock()
+        clock.stoppedMu.RLock()
+        defer clock.stoppedMu.RUnlock()
 
         return clock.stopped
 }
@@ -250,8 +247,8 @@ func (clock *SimClock) isStopped() bool {
 func (clock *SimClock) stop() bool {
         gossert.Ok(nil != clock, "simclock: clock is nil")
 
-        clock.stopMu.Lock()
-        defer clock.stopMu.Unlock()
+        clock.stoppedMu.Lock()
+        defer clock.stoppedMu.Unlock()
 
         if clock.stopped {
                 return false
@@ -269,9 +266,9 @@ func (clock *SimClock) stop() bool {
         return true
 }
 
-// An event is some future event. Events have a channel to which the
-// current time is sent when the event happens.
-type event struct {
+// simClockEvent is used to implement simulated sleeps, timers. and tickers.
+// The duration can be reset and the event can be set to fire repeatedly.
+type simClockEvent struct {
         // The amount of time until the event happens from the moment it was created.
         d time.Duration
 
@@ -281,67 +278,67 @@ type event struct {
         // The time when the event will occur.
         when time.Time
 
-        // Whether the event repeats every d duration.
+        // Set to true to fire again after d duration.
         repeat bool
 
         // Whether this event has been stopped/canceled.
         stopped bool
 }
 
-// An eventUpdate is an update for an event. Simulated clocks take event
-// updates and update the state of registered events.
-type eventUpdate struct {
+// Instances of simClockEventUpdate are used to update simulated timers and tickers.
+// They can be stopped and reset.
+type simClockEventUpdate struct {
         // Set to -1 to stop event. 0 does nothing. Any positive number
         // will reset the event duration.
         d time.Duration
 
         // The event to apply the update to.
-        event *event
+        event *simClockEvent
 }
 
-// List of registered events that need to be fired when they occur.
+// List of registered simulated clock events that need to be fired when they occur.
 // An event is registered if it is in the list.
-type callbacks []*event
+type registeredSimClockEvents []*simClockEvent
 
 // Len returns the number of registered events.
-func (cbs callbacks) Len() int {
-        return len(cbs)
+func (events registeredSimClockEvents) Len() int {
+        return len(events)
 }
 
 // Less returns true if the event at index i needs to be fired before
 // the event at index j.
-func (cbs callbacks) Less(i, j int) bool {
-        return cbs[i].when.Before(cbs[j].when)
+func (events registeredSimClockEvents) Less(i, j int) bool {
+        return events[i].when.Before(events[j].when)
 }
 
 // Swap swaps the events at indexes i and j.
-func (cbs callbacks) Swap(i, j int) {
-        cbs[i], cbs[j] = cbs[j], cbs[i]
+func (events registeredSimClockEvents) Swap(i, j int) {
+        events[i], events[j] = events[j], events[i]
 }
 
 // Register registers the event ev. ev is guaranteed to
 // fire in the next tick if its deadline comes before
 // the other registered events.
-func (cbs *callbacks) Register(ev *event) {
-        gossert.Ok(nil != cbs, "simclock: cannot register new event on nil events list")
+func (events *registeredSimClockEvents) Register(ev *simClockEvent) {
+        gossert.Ok(nil != events, "simclock: cannot register new event on nil events list")
 
-        *cbs = append(*cbs, ev)
-        sort.Sort(cbs)
+        *events = append(*events, ev)
+        sort.Sort(events)
 }
 
 // next returns the next event that should be fired and removes it
 // from the list. It returns nil if there are no events i.e. if
 // e.Len() == 0.
-func (cbs *callbacks) next() *event {
-        gossert.Ok(nil != cbs, "simclock: cannot get next event from nil events list")
+func (events *registeredSimClockEvents) next() *simClockEvent {
+        gossert.Ok(nil != events, "simclock: cannot get next event from nil events list")
 
-        if len(*cbs) == 0 {
+        if len(*events) == 0 {
                 return nil
         }
 
-        ev := (*cbs)[0]
+        ev := (*events)[0]
 
-        *cbs = (*cbs)[1:]
+        *events = (*events)[1:]
 
         return ev
 }
@@ -349,11 +346,11 @@ func (cbs *callbacks) next() *event {
 // peek returns the next event that needs to be fired without
 // removing it from the list. It returns nil if there are no
 // events i.e. if e.Len() == 0.
-func (cbs *callbacks) peek() *event {
-        gossert.Ok(nil != cbs, "simclock: cannot peek next event from nil events list")
-        if len(*cbs) == 0 {
+func (events *registeredSimClockEvents) peek() *simClockEvent {
+        gossert.Ok(nil != events, "simclock: cannot peek next event from nil events list")
+        if len(*events) == 0 {
                 return nil
         }
 
-        return (*cbs)[0]
+        return (*events)[0]
 }
