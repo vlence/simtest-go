@@ -27,8 +27,8 @@ type simTimer struct {
 // time has passed since calling Reset and returns
 // true. It returns false if the timer has already
 // been fired or has expired.
-func (cb *simTimer) Reset(d time.Duration) bool {
-        if cb.stopped {
+func (timer *simTimer) Reset(d time.Duration) bool {
+        if timer.stopped {
                 return false
         }
 
@@ -37,7 +37,7 @@ func (cb *simTimer) Reset(d time.Duration) bool {
                 d = 0
         }
 
-        cb.clock.updateEvent(d, &cb.event)
+        timer.clock.updateEvent(d, &timer.event)
 
         return true
 }
@@ -45,12 +45,12 @@ func (cb *simTimer) Reset(d time.Duration) bool {
 // Stop cancels this timer and returns true. If the timer
 // has already fired or has expired then it does nothing
 // and returns false.
-func (cb *simTimer) Stop() bool {
-        if cb.stopped {
+func (timer *simTimer) Stop() bool {
+        if timer.stopped {
                 return false
         }
 
-        cb.clock.updateEvent(-1, &cb.event)
+        timer.clock.updateEvent(-1, &timer.event)
 
         return true
 }
