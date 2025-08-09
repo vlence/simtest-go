@@ -2,6 +2,8 @@ package simtest
 
 import (
 	"time"
+
+	"github.com/vlence/gossert"
 )
 
 // A Timer represents an event in the future. This interface is kept deliberately
@@ -28,6 +30,8 @@ type simTimer struct {
 // true. It returns false if the timer has already
 // been fired or has expired.
 func (timer *simTimer) Reset(d time.Duration) bool {
+        gossert.Ok(nil != timer, "simtimer: resetting nil timer")
+
         if timer.stopped {
                 return false
         }
@@ -46,6 +50,8 @@ func (timer *simTimer) Reset(d time.Duration) bool {
 // has already fired or has expired then it does nothing
 // and returns false.
 func (timer *simTimer) Stop() bool {
+        gossert.Ok(nil != timer, "simtimer: stopping nil timer")
+
         if timer.stopped {
                 return false
         }
