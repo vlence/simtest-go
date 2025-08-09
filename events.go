@@ -1,8 +1,10 @@
 package simtest
 
 import (
-        "sort"
-        "time"
+	"sort"
+	"time"
+
+	"github.com/vlence/gossert"
 )
 
 // An event is some future event. Events have a channel to which the
@@ -59,6 +61,8 @@ func (cbs callbacks) Swap(i, j int) {
 // fire in the next tick if its deadline comes before
 // the other registered events.
 func (cbs *callbacks) Register(ev *event) {
+        gossert.Ok(nil != cbs, "simclock: cannot register new event on nil events list")
+
         *cbs = append(*cbs, ev)
         sort.Sort(cbs)
 }
@@ -67,6 +71,8 @@ func (cbs *callbacks) Register(ev *event) {
 // from the list. It returns nil if there are no events i.e. if
 // e.Len() == 0.
 func (cbs *callbacks) next() *event {
+        gossert.Ok(nil != cbs, "simclock: cannot get next event from nil events list")
+
         if len(*cbs) == 0 {
                 return nil
         }
@@ -82,6 +88,7 @@ func (cbs *callbacks) next() *event {
 // removing it from the list. It returns nil if there are no
 // events i.e. if e.Len() == 0.
 func (cbs *callbacks) peek() *event {
+        gossert.Ok(nil != cbs, "simclock: cannot peek next event from nil events list")
         if len(*cbs) == 0 {
                 return nil
         }
