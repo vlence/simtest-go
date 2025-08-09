@@ -21,7 +21,7 @@ type Timer interface {
 // simulated clock cannot progress forward until a receiver receives from the
 // timer's channel.
 type simTimer struct {
-        event simClockEvent
+        simClockEvent
         clock *SimClock
 }
 
