@@ -8,6 +8,10 @@ import (
         "github.com/vlence/gossert"
 )
 
+// Use this to get the current time, sleep, create tickers,
+// and create timers in production.
+var RealClock Clock = &realClock{}
+
 // A Clock returns the current time and can create timers and tickers. An
 // application should use the same clock throughout its execution.
 type Clock interface {
@@ -22,6 +26,32 @@ type Clock interface {
 
         // Sleep blocks this goroutine for d amount of time.
         Sleep(d time.Duration)
+}
+
+// realClock represents the real world clock. Now will always return
+// the current real world time according to the underlying system.
+type realClock struct{}
+
+// Now returns the result of calling time.Now.
+func (clock *realClock) Now() time.Time {
+        return time.Now()
+}
+
+// NewTimer returns the result of calling time.NewTimer.
+func (*realClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
+        timer := time.NewTimer(d)
+        return timer, timer.C
+}
+
+// NewTicker returns the result of calling time.NewTicker.
+func (*realClock) NewTicker(d time.Duration) (Ticker, <-chan time.Time) {
+        ticker := time.NewTicker(d)
+        return ticker, ticker.C
+}
+
+// Sleep blocks this goroutine for d amount of time.
+func (*realClock) Sleep(d time.Duration) {
+        time.Sleep(d)
 }
 
 // SimClock is a simulated clock. The clock moves forward
