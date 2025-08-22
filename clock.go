@@ -18,7 +18,7 @@ type Clock interface {
         NewTimer(d time.Duration) (Timer, <-chan time.Time)
 
         // NewTicker returns a ticker that fires every d intervals.
-        NewTicker(d time.Duration) Ticker
+        NewTicker(d time.Duration) (Ticker, <-chan time.Time)
 
         // Sleep blocks this goroutine for d amount of time.
         Sleep(d time.Duration)
@@ -112,14 +112,24 @@ func (clock *SimClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
 }
 
 // NewTicker returns a *SimTicker. NewTicker panics if the clock has been stopped.
-func (clock *SimClock) NewTicker(d time.Duration) Ticker {
+func (clock *SimClock) NewTicker(d time.Duration) (Ticker, <-chan time.Time) {
         gossert.Ok(nil != clock, "simclock: clock is nil")
         gossert.Ok(!clock.isStopped(), "simclock: creating new ticker using stopped clock")
 
-        ch := make(chan time.Time)
-        ticker := newSimTicker(d, (<-chan time.Time)(ch), clock)
+        ticker := &simTicker{
+                simClockEvent{
+                        d:       d,
+                        ch:      make(chan time.Time),
+                        when:    clock.Now().Add(d),
+                        repeat:  true,
+                        stopped: false,
+                },
+                clock,
+        }
 
-        return ticker
+        clock.registerEventCh <- &ticker.simClockEvent
+
+        return ticker, ticker.ch
 }
 
 // Sleep blocks this goroutine for d amount of time. This

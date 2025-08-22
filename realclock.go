@@ -18,8 +18,9 @@ func (*realClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
 }
 
 // NewTicker returns the result of calling time.NewTicker.
-func (*realClock) NewTicker(d time.Duration) Ticker {
-        return time.NewTicker(d)
+func (*realClock) NewTicker(d time.Duration) (Ticker, <-chan time.Time) {
+        ticker := time.NewTicker(d)
+        return ticker, ticker.C
 }
 
 // Sleep blocks this goroutine for d amount of time.
