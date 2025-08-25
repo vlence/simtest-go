@@ -150,6 +150,7 @@ func (scheduler *SimScheduler) Tick() bool {
 		scheduler.blockedTasks = append(scheduler.blockedTasks, newTask)
 	case yield := <-scheduler.yield:
 		task.yield = yield
+		task.status = taskBlocked
 		scheduler.blockedTasks = append(scheduler.blockedTasks, task)
 	case <-scheduler.taskDone:
 		task.status = taskStopped
