@@ -159,7 +159,12 @@ func (scheduler *SimScheduler) Tick() bool {
 
 	if len(scheduler.runningTasks) == scheduler.nextTask {
 		scheduler.runningTasks, scheduler.blockedTasks = scheduler.blockedTasks, scheduler.runningTasks[:0]
-		scheduler.nextTask = len(scheduler.runningTasks) - 1
+
+		if len(scheduler.runningTasks) > 0 {
+			scheduler.nextTask = 0
+		} else {
+			scheduler.nextTask = -1
+		}
 	}
 
 	return true
