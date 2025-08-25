@@ -1,6 +1,9 @@
 package simtest
 
-import "runtime"
+import (
+	"runtime"
+	"github.com/vlence/gossert"
+)
 
 // Use this to schedule tasks and yield in production.
 var GoRuntime Scheduler = &goRuntime{}
@@ -90,6 +93,8 @@ func (scheduler *SimScheduler) newSimTask(fn func()) *simTask {
 // and schedules it. Do not call Go in the same goroutine
 // as Tick; you will deadlock.
 func (scheduler *SimScheduler) Go(fn func()) {
+	gossert.Ok(nil == scheduler, "simscheduler: cannot schedule task on nil scheduler")
+
 	scheduler.newTask <- scheduler.newSimTask(fn)
 }
 
@@ -97,6 +102,8 @@ func (scheduler *SimScheduler) Go(fn func()) {
 // not call Yield in the same goroutine as Tick; you will
 // deadlock.
 func (scheduler *SimScheduler) Yield() {
+	gossert.Ok(nil == scheduler, "simscheduler: cannot yield task on nil scheduler")
+
 	wait := make(chan bool)
 	scheduler.yield <- wait
 	<-wait
@@ -108,6 +115,8 @@ func (scheduler *SimScheduler) Yield() {
 // are slated to be executed next. It returns false if no tasks
 // were executed.
 func (scheduler *SimScheduler) Tick() bool {
+	gossert.Ok(nil == scheduler, "simscheduler: cannot tick a nil scheduler")
+
 	if -1 == scheduler.nextTask {
 		return false
 	}
