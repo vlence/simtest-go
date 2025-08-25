@@ -105,8 +105,13 @@ func (scheduler *SimScheduler) Yield() {
 // Tick moves this scheduler forward by picking the next task
 // from the running queue and executing it. If all tasks in
 // the running queue have been executed then the blocked tasks
-// are slated to be executed next.
-func (scheduler *SimScheduler) Tick() {
+// are slated to be executed next. It returns false if no tasks
+// were executed.
+func (scheduler *SimScheduler) Tick() bool {
+	if -1 == scheduler.nextTask {
+		return false
+	}
+
 	task := scheduler.runningTasks[scheduler.nextTask]
 
 	// todo: assert that task is not waiting for yield, clock and io simultaneously
@@ -145,4 +150,6 @@ func (scheduler *SimScheduler) Tick() {
 		scheduler.runningTasks, scheduler.blockedTasks = scheduler.blockedTasks, scheduler.runningTasks[:0]
 		scheduler.nextTask = len(scheduler.runningTasks) - 1
 	}
+
+	return true
 }
