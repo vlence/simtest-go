@@ -123,6 +123,8 @@ func (scheduler *SimScheduler) Tick() bool {
 
 	task := scheduler.runningTasks[scheduler.nextTask]
 
+	gossert.Ok(taskStopped == task.status, "simscheduler: stopped task in run queue")
+
 	// todo: assert that task is not waiting for yield, clock and io simultaneously
 
 	if taskQueued == task.status {
