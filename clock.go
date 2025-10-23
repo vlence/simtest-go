@@ -140,16 +140,16 @@ func (clock *SimClock) Sleep(d time.Duration) {
 			done <- struct{}{}
 		},
 	}
-        <-clock.nextHandle
+	<-clock.nextHandle
 
-        <-done
+	<-done
 }
 
 // Tick moves the clock forward by the configured tick rate
 // and schedules callbacks of timers that have expired.
 func (clock *SimClock) Tick() {
 	clock.tick <- struct{}{}
-        <-clock.tick
+	<-clock.tick
 }
 
 // Stop stops this clock. It is incorrect to use a clock after it has been stopped.
@@ -230,7 +230,7 @@ func (clock *SimClock) start() {
 				freedTimer <- idx
 			}
 
-                        clock.tick <- struct{}{}
+			clock.tick <- struct{}{}
 
 		case req := <-clock.stopTimer:
 			timer := &timers[req.idx]
