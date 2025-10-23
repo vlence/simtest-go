@@ -105,9 +105,7 @@ func TestClockAfterFunc(t *testing.T) {
 
         done := make(chan time.Time)
         clock.AfterFunc(delay, func(now time.Time) {
-                go func() {
-                        done <- now
-                }()
+                done <- now
         })
 
         for {

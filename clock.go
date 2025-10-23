@@ -220,7 +220,7 @@ func (clock *SimClock) start() {
 				}
 
 				gossert.Ok(timer.callback != nil, "clock: timer callback is nil")
-				timer.callback(clock.now)
+				go timer.callback(clock.now)
 
 				if timer.repeat > 0 {
 					timer.ticksLeft = timer.repeat / clock.tickRate
