@@ -1,396 +1,354 @@
 package simtest
 
 import (
-        "sort"
-        "sync"
-        "time"
+	"time"
 
-        "github.com/vlence/gossert"
+	"github.com/vlence/gossert"
 )
 
-// Use this to get the current time, sleep, create tickers,
-// and create timers in production.
-var RealClock Clock = &realClock{}
+// A timer. Timers may be called just once or multiple times
+// at regular intervals. They can be stopped or reset.
+type Timer interface {
+	// Stops this timer and returns true. If this timer
+	// is already stopped then it returns false.
+	Stop() bool
 
-// A Clock returns the current time and can create timers and tickers. An
-// application should use the same clock throughout its execution.
+	// Resets this timer to be called after the given
+	// duration instead and returns true. If the timer
+	// is already stopped then this function returns
+	// false. Resetting a stopped timer will not restart
+	// it.
+	Reset(time.Duration) bool
+}
+
+type TimerCallback func(time.Time)
+
 type Clock interface {
-        // Now returns the current time.
-        Now() time.Time
+	// Now returns the current time.
+	Now() time.Time
 
-        // NewTimer returns a timer that fires after d time has passed.
-        NewTimer(d time.Duration) (Timer, <-chan time.Time)
+	// AfterFunc calls the given function with the current
+	// after the given duration of time has passed. The given
+	// function is run in a separate goroutine.
+	AfterFunc(time.Duration, TimerCallback) Timer
 
-        // NewTicker returns a ticker that fires every d intervals.
-        NewTicker(d time.Duration) (Ticker, <-chan time.Time)
+	// TickFunc calls the given function after every interval
+	// of the given duration. The given function is run in a
+	// separate goroutine.
+	TickFunc(time.Duration, TimerCallback) Timer
 
-        // Sleep blocks this goroutine for d amount of time.
-        Sleep(d time.Duration)
+	// Sleep blocks this goroutine until the given amount
+	// of time has passed.
+	Sleep(time.Duration)
 }
 
-// realClock represents the real world clock. Now will always return
-// the current real world time according to the underlying system.
-type realClock struct{}
-
-// Now returns the result of calling time.Now.
-func (clock *realClock) Now() time.Time {
-        return time.Now()
-}
-
-// NewTimer returns the result of calling time.NewTimer.
-func (*realClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
-        timer := time.NewTimer(d)
-        return timer, timer.C
-}
-
-// NewTicker returns the result of calling time.NewTicker.
-func (*realClock) NewTicker(d time.Duration) (Ticker, <-chan time.Time) {
-        ticker := time.NewTicker(d)
-        return ticker, ticker.C
-}
-
-// Sleep blocks this goroutine for d amount of time.
-func (*realClock) Sleep(d time.Duration) {
-        time.Sleep(d)
-}
-
-// SimClock is a simulated clock. The clock moves forward
-// in time only when Tick is called. Every simulated clock
-// runs a goroutine in the background that manages callbacks
-// like sleeps, timers, and tickers. Some of its methods are
-// not safe for use within the same goroutine. Read the
-// documentation of Tick, NewTimer, NewTicker, and Sleep.
 type SimClock struct {
-        // Mutex to sync reads and writes to now.
-        nowMu *sync.RWMutex
+	now      time.Time
+	tickRate time.Duration
 
-        // Mutex to sync reads and writes to stopped.
-        stoppedMu *sync.RWMutex
+	tick        chan struct{}
+	stop        chan struct{}
+	currentTime chan time.Time
 
-        // The current time of the clock. Call Now to get this value
-        // in a thread safe manner.
-        now time.Time
+	newTickTimer  chan newTimerRequest
+	newAfterTimer chan newTimerRequest
+	newSleepTimer chan newTimerRequest
 
-        // This is true if this clock has been stopped. Call isStopped
-        // to get this value in a thread safe manner.
-        stopped bool
+	stopTimer  chan stopTimerRequest
+	resetTimer chan resetTimerRequest
 
-        // Send the current time to the event manager goroutine on every
-        // tick.
-        tickCh chan time.Time
-
-        // Send true to this channel to stop the event manager goroutine.
-        stopCh chan bool
-
-        // Send event updates to this channel to update events.
-        eventUpdateCh chan *simClockEventUpdate
-
-        // Send new events to this channel to register new events.
-        registerEventCh chan *simClockEvent
+	nextHandle chan simTimerHandle
 }
 
-// NewSimClock returns a SimClock whose current time is now.
-func NewSimClock(now time.Time) *SimClock {
-        clock := new(SimClock)
-        clock.nowMu = new(sync.RWMutex)
-        clock.stoppedMu = new(sync.RWMutex)
-        clock.now = now
-        clock.stopCh = make(chan bool)
-        clock.tickCh = make(chan time.Time)
-        clock.eventUpdateCh = make(chan *simClockEventUpdate)
-        clock.registerEventCh = make(chan *simClockEvent)
-
-        go clock.eventManager()
-
-        return clock
+type simTimer struct {
+	gen       uint32
+	ticksLeft time.Duration
+	callback  TimerCallback
+	repeat    time.Duration
 }
 
-// Now returns the current time. To move the time forward call Tick.
+type newTimerRequest struct {
+	d        time.Duration
+	callback TimerCallback
+}
+
+type stopTimerRequest struct {
+	simTimerHandle
+	ok bool
+}
+
+type resetTimerRequest struct {
+	simTimerHandle
+	ok       bool
+	tickRate time.Duration
+}
+
+type simTimerAndHandle struct {
+	*simTimer
+	simTimerHandle
+}
+
+func NewSimClock(now time.Time, tickRate time.Duration) *SimClock {
+	clock := &SimClock{
+		now:      now,
+		tickRate: tickRate,
+
+		tick:        make(chan struct{}),
+		stop:        make(chan struct{}),
+		currentTime: make(chan time.Time),
+
+		stopTimer:  make(chan stopTimerRequest),
+		resetTimer: make(chan resetTimerRequest),
+
+		newTickTimer:  make(chan newTimerRequest),
+		newAfterTimer: make(chan newTimerRequest),
+		newSleepTimer: make(chan newTimerRequest),
+
+		nextHandle: make(chan simTimerHandle),
+	}
+
+	go clock.start()
+
+	return clock
+}
+
+// Now returns the current time according to this clock.
 func (clock *SimClock) Now() time.Time {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
-
-        clock.nowMu.RLock()
-        defer clock.nowMu.RUnlock()
-
-        return clock.now
+	return <-clock.currentTime
 }
 
-// NewTimer creates and returns a simulated timer. The simulated timer fires
-// after d amount of time has passed i.e. it fires if Tick has been called
-// enough times to simulate d amount of time passing. Care must be taken to
-// not create a simulated timer and wait for it to expire in the same
-// goroutine that calls Tick because it can deadlock. NewTimer panics
-// if the clock has been stopped.
-func (clock *SimClock) NewTimer(d time.Duration) (Timer, <-chan time.Time) {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
-        gossert.Ok(!clock.isStopped(), "simclock: creating new timer using stopped clock")
-
-        timer := &simTimer{
-                simClockEvent{
-                        d:       d,
-                        ch:      make(chan time.Time),
-                        when:    clock.Now().Add(d),
-                        repeat:  false,
-                        stopped: false,
-                },
-                clock,
-        }
-
-        clock.registerEventCh <- &timer.simClockEvent
-
-        return timer, timer.ch
+// AfterFunc executes callback after d amount of time has passed according to this
+// clock.
+func (clock *SimClock) AfterFunc(d time.Duration, callback TimerCallback) Timer {
+	clock.newAfterTimer <- newTimerRequest{d, callback}
+	return <-clock.nextHandle
 }
 
-// NewTicker returns a *SimTicker. NewTicker panics if the clock has been stopped.
-func (clock *SimClock) NewTicker(d time.Duration) (Ticker, <-chan time.Time) {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
-        gossert.Ok(!clock.isStopped(), "simclock: creating new ticker using stopped clock")
-
-        ticker := &simTicker{
-                simClockEvent{
-                        d:       d,
-                        ch:      make(chan time.Time),
-                        when:    clock.Now().Add(d),
-                        repeat:  true,
-                        stopped: false,
-                },
-                clock,
-        }
-
-        clock.registerEventCh <- &ticker.simClockEvent
-
-        return ticker, ticker.ch
+// TickFunc executes callback at regular intervals of d amount of time.
+func (clock *SimClock) TickFunc(d time.Duration, callback TimerCallback) Timer {
+	clock.newTickTimer <- newTimerRequest{d, callback}
+	return <-clock.nextHandle
 }
 
-// Sleep blocks this goroutine for d amount of time. This
-// function will return once Tick has been called enough times to
-// simulate d amount of time passing. Care must be taken to ensure Sleep
-// and Tick are not called from the same goroutine. If they're called
-// from the same goroutine the program will deadlock. Sleep will panic
-// if the clock has been stopped.
+// Sleep will block the current goroutine for d amount of time.
 func (clock *SimClock) Sleep(d time.Duration) {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
-        gossert.Ok(!clock.isStopped(), "simclock: sleeping a stopped clock")
+	done := make(chan struct{})
 
-        ev := &simClockEvent{
-                d:       d,
-                ch:      make(chan time.Time),
-                when:    clock.Now().Add(d),
-                repeat:  false,
-                stopped: false,
-        }
+	clock.newSleepTimer <- newTimerRequest{
+		d,
+		func(time.Time) {
+			done <- struct{}{}
+		},
+	}
+        <-clock.nextHandle
 
-        clock.registerEventCh <- ev
-
-        <-ev.ch
+        <-done
 }
 
-// Tick moves the clock's time forward by tickSize and returns
-// the current time. All registered events that need to be fired
-// next will be fired. This method will block the goroutine and
-// can lead to a deadlock in certain situations. For example if
-// you call Sleep and Tick in the same goroutine, that goroutine
-// will deadlock. Tick will panic if the clock has been stopped.
-func (clock *SimClock) Tick(tickSize time.Duration) time.Time {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
-        gossert.Ok(!clock.isStopped(), "simclock: ticking a stopped clock")
-
-        clock.nowMu.Lock()
-        defer clock.nowMu.Unlock()
-
-        now := clock.now.Add(tickSize)
-        clock.now = now
-
-        clock.tickCh <- now
-
-        return now
+// Tick moves the clock forward by the configured tick rate
+// and schedules callbacks of timers that have expired.
+func (clock *SimClock) Tick() {
+	clock.tick <- struct{}{}
+        <-clock.tick
 }
 
-// updateEvent sends an event update request to the background goroutine that manages
-// the events. updateEvent will panic if the clock has been stopped.
-func (clock *SimClock) updateEvent(d time.Duration, event *simClockEvent) {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
-
-        gossert.Ok(!clock.isStopped(), "simclock: updating event of stopped clock")
-        gossert.Ok(event != nil, "simclock: trying to update nil event")
-
-        clock.eventUpdateCh <- &simClockEventUpdate{d, event}
+// Stop stops this clock. It is incorrect to use a clock after it has been stopped.
+// All operations on a stopped clock will be blocked forever.
+func (clock *SimClock) Stop() {
+	clock.stop <- struct{}{}
 }
 
-// eventManager manages events. It accepts new events to be registered,
-// updates them and fires them once they have expired. eventManager
-// must be run as a separate goroutine.
-func (clock *SimClock) eventManager() {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
+func (clock *SimClock) start() {
+	timers := make([]simTimer, 0)
 
-        events := make(registeredSimClockEvents, 0)
+	// buffered channel containing the most recently freed timer
+	freedTimer := make(chan uint32, 1)
 
-        for {
-                select {
-                case newEvent := <-clock.registerEventCh:
-                        events.Register(newEvent)
+	freeTimers := make([]uint32, 0)  // list of all timers that can be reused
+	inUseTimers := make([]uint32, 0) // list of all timers currently in use
 
-                case update := <-clock.eventUpdateCh:
-                        d, event := update.d, update.event
-                        gossert.Ok(event != nil, "simclock: trying to update nil event")
+	nextSimTimerAndHandle := clock.nextSimTimerAndHandle(&timers, &freeTimers)
 
-                        if d < 0 {
-                                event.stopped = true
-                                break
-                        }
+	for {
+		select {
+		case req := <-clock.newAfterTimer:
+			timer := nextSimTimerAndHandle.simTimer
 
-                        event.d = d
-                        event.when = clock.Now().Add(d)
-                        sort.Sort(events)
+			timer.ticksLeft = req.d / clock.tickRate
+			timer.callback = req.callback
 
-                case now := <-clock.tickCh:
-                        // execute callbacks that have expired.
-                        for event := events.peek(); event != nil && !now.Before(event.when); event = events.peek() {
-                                gossert.Ok(event == events.next(), "simclock: peeked callback is not same as popped callback")
+			inUseTimers = append(inUseTimers, nextSimTimerAndHandle.idx)
+			nextSimTimerAndHandle = clock.nextSimTimerAndHandle(&timers, &freeTimers)
 
-                                if event.stopped {
-                                        continue
-                                }
+			clock.nextHandle <- nextSimTimerAndHandle.simTimerHandle
 
-                                event.ch <- now
+		case req := <-clock.newTickTimer:
+			timer := nextSimTimerAndHandle.simTimer
 
-                                if !event.repeat {
-                                        event.stopped = true
-                                        continue
-                                }
+			timer.ticksLeft = req.d / clock.tickRate
+			timer.callback = req.callback
+			timer.repeat = req.d
 
-                                event.when = event.when.Add(event.d)
-                                events.Register(event)
-                        }
+			inUseTimers = append(inUseTimers, nextSimTimerAndHandle.idx)
+			nextSimTimerAndHandle = clock.nextSimTimerAndHandle(&timers, &freeTimers)
 
-                case <-clock.stopCh:
-                        for event := events.next(); event != nil; event = events.next() {
-                                event.stopped = true
-                                close(event.ch)
-                        }
-                        return
-                }
-        }
+			clock.nextHandle <- nextSimTimerAndHandle.simTimerHandle
+
+		case req := <-clock.newSleepTimer:
+			timer := nextSimTimerAndHandle.simTimer
+
+			timer.ticksLeft = req.d / clock.tickRate
+			timer.callback = req.callback
+
+			inUseTimers = append(inUseTimers, nextSimTimerAndHandle.idx)
+			nextSimTimerAndHandle = clock.nextSimTimerAndHandle(&timers, &freeTimers)
+
+			clock.nextHandle <- nextSimTimerAndHandle.simTimerHandle
+
+		case clock.currentTime <- clock.now:
+
+		case <-clock.tick:
+			clock.now = clock.now.Add(clock.tickRate)
+
+			for _, idx := range inUseTimers {
+				timer := &timers[idx]
+
+				gossert.Ok(timer.ticksLeft >= 0, "clock: timer has negative ticks left")
+				if timer.ticksLeft > 0 {
+					timer.ticksLeft--
+					continue
+				}
+
+				gossert.Ok(timer.callback != nil, "clock: timer callback is nil")
+				timer.callback(clock.now)
+
+				if timer.repeat > 0 {
+					timer.ticksLeft = timer.repeat / clock.tickRate
+					continue
+				}
+
+				freedTimer <- idx
+			}
+
+                        clock.tick <- struct{}{}
+
+		case req := <-clock.stopTimer:
+			timer := &timers[req.idx]
+
+			if timer.gen != req.gen {
+				req.ok = false
+			} else {
+				req.ok = true
+			}
+
+			freedTimer <- req.idx
+			clock.stopTimer <- req
+
+		case req := <-clock.resetTimer:
+			timer := &timers[req.idx]
+
+			if timer.gen != req.gen {
+				req.ok = false
+			} else {
+				timer.ticksLeft = req.tickRate / clock.tickRate
+
+				if timer.repeat > 0 {
+					timer.repeat = req.tickRate
+				}
+
+				req.ok = true
+			}
+
+			freedTimer <- req.idx
+			clock.resetTimer <- req
+
+		case idx := <-freedTimer:
+			timer := &timers[idx]
+
+			timer.gen++
+			timer.repeat = 0
+			timer.callback = nil
+			timer.ticksLeft = 0
+
+			freeTimers = append(freeTimers, idx)
+
+			for i := range inUseTimers {
+				if inUseTimers[i] == idx {
+					for j := len(inUseTimers) - 1; i < j; i++ {
+						inUseTimers[i] = inUseTimers[i+1]
+					}
+
+					inUseTimers = inUseTimers[:len(inUseTimers)-1]
+
+					break
+				}
+			}
+
+		case <-clock.stop:
+			return
+		}
+	}
 }
 
-// isStopped returns true if this clock has been stopped.
-func (clock *SimClock) isStopped() bool {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
+func (clock *SimClock) nextSimTimerAndHandle(timersPtr *[]simTimer, freeTimersPtr *[]uint32) simTimerAndHandle {
+	var timer *simTimer
+	var timerHandle simTimerHandle
 
-        clock.stoppedMu.RLock()
-        defer clock.stoppedMu.RUnlock()
+	timers := *timersPtr
+	freeTimers := *freeTimersPtr
 
-        return clock.stopped
+	timerHandle.clock = clock
+
+	if len(freeTimers) > 0 {
+		lastIndex := len(freeTimers) - 1
+		timerIndex := freeTimers[lastIndex]
+
+		timer = &timers[timerIndex]
+		timer.gen++
+		timer.repeat = 0
+		timer.callback = nil
+
+		timerHandle.idx = timerIndex
+		timerHandle.gen = timer.gen
+
+		freeTimers = freeTimers[:lastIndex]
+	} else {
+		lastIndex := len(timers)
+
+		timers = append(timers, simTimer{})
+
+		timer = &timers[lastIndex]
+
+		timerHandle.idx = uint32(lastIndex)
+		timerHandle.gen = timer.gen
+	}
+
+	*timersPtr = timers
+	*freeTimersPtr = freeTimers
+
+	return simTimerAndHandle{timer, timerHandle}
 }
 
-// stop stops this clock. Channels of all pending events are closed.
-func (clock *SimClock) stop() bool {
-        gossert.Ok(nil != clock, "simclock: clock is nil")
-
-        clock.stoppedMu.Lock()
-        defer clock.stoppedMu.Unlock()
-
-        if clock.stopped {
-                return false
-        }
-
-        clock.stopCh <- true
-
-        close(clock.tickCh)
-        close(clock.stopCh)
-        close(clock.registerEventCh)
-        close(clock.eventUpdateCh)
-
-        clock.stopped = true
-
-        return true
+type simTimerHandle struct {
+	idx   uint32
+	gen   uint32
+	clock *SimClock
 }
 
-// simClockEvent is used to implement simulated sleeps, timers. and tickers.
-// The duration can be reset and the event can be set to fire repeatedly.
-type simClockEvent struct {
-        // The amount of time until the event happens from the moment it was created.
-        d time.Duration
+func (handle simTimerHandle) Stop() bool {
+	req := stopTimerRequest{handle, false}
 
-        // The current time will be sent to this channel when the event occurs.
-        ch chan time.Time
+	handle.clock.stopTimer <- req
+	req = <-handle.clock.stopTimer
 
-        // The time when the event will occur.
-        when time.Time
-
-        // Set to true to fire again after d duration.
-        repeat bool
-
-        // Whether this event has been stopped/canceled.
-        stopped bool
+	return req.ok
 }
 
-// Instances of simClockEventUpdate are used to update simulated timers and tickers.
-// They can be stopped and reset.
-type simClockEventUpdate struct {
-        // Set to -1 to stop event. 0 does nothing. Any positive number
-        // will reset the event duration.
-        d time.Duration
+func (handle simTimerHandle) Reset(d time.Duration) bool {
+	req := resetTimerRequest{handle, false, d}
 
-        // The event to apply the update to.
-        event *simClockEvent
-}
+	handle.clock.resetTimer <- req
+	req = <-handle.clock.resetTimer
 
-// List of registered simulated clock events that need to be fired when they occur.
-// An event is registered if it is in the list.
-type registeredSimClockEvents []*simClockEvent
-
-// Len returns the number of registered events.
-func (events registeredSimClockEvents) Len() int {
-        return len(events)
-}
-
-// Less returns true if the event at index i needs to be fired before
-// the event at index j.
-func (events registeredSimClockEvents) Less(i, j int) bool {
-        return events[i].when.Before(events[j].when)
-}
-
-// Swap swaps the events at indexes i and j.
-func (events registeredSimClockEvents) Swap(i, j int) {
-        events[i], events[j] = events[j], events[i]
-}
-
-// Register registers the event ev. ev is guaranteed to
-// fire in the next tick if its deadline comes before
-// the other registered events.
-func (events *registeredSimClockEvents) Register(ev *simClockEvent) {
-        gossert.Ok(nil != events, "simclock: cannot register new event on nil events list")
-
-        *events = append(*events, ev)
-        sort.Sort(events)
-}
-
-// next returns the next event that should be fired and removes it
-// from the list. It returns nil if there are no events i.e. if
-// e.Len() == 0.
-func (events *registeredSimClockEvents) next() *simClockEvent {
-        gossert.Ok(nil != events, "simclock: cannot get next event from nil events list")
-
-        if len(*events) == 0 {
-                return nil
-        }
-
-        ev := (*events)[0]
-
-        *events = (*events)[1:]
-
-        return ev
-}
-
-// peek returns the next event that needs to be fired without
-// removing it from the list. It returns nil if there are no
-// events i.e. if e.Len() == 0.
-func (events *registeredSimClockEvents) peek() *simClockEvent {
-        gossert.Ok(nil != events, "simclock: cannot peek next event from nil events list")
-        if len(*events) == 0 {
-                return nil
-        }
-
-        return (*events)[0]
+	return req.ok
 }
